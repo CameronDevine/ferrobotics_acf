@@ -1,0 +1,11 @@
+<package>
+ <name>ferrobotics_acf</name>
+ <version>0.1.0</version>
+ <description>A node for controlling the Ferrobotics Active Contact Flange over the TCP/IP Ethernet interface.</description>
+ <author>Cameron Devine</author>
+ <license>BSD</license>
+ <maintainer email="camdev@uw.edu"/>
+ <buildtool_depend>catkin</buildtool_depend>
+ <build_depend>message_generation</build_depend>
+ <run_depend>message_runtime</run_depend>
+</package>

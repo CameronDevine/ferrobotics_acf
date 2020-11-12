@@ -7,9 +7,10 @@ from ferrobotics_acf.srv import (
     SetFloatResponse,
     SetDuration,
     SetDurationResponse,
-    )
+)
 from std_msgs.msg import Float32
 import socket
+
 
 class FerroboticsACF:
     DEFAULT_IP = "192.168.99.1"
@@ -25,25 +26,37 @@ class FerroboticsACF:
     MAX_T_RAMP = 10
     PAYLOAD_SHARE = 0.1
     ERROR_CODE_BIN_LENGTH = 8
+    ERROR_MESSAGES = [
+        "valve error",
+        "sensor error",
+        "Head and controller are not compatible",
+        "set_f_target cannot be reached",
+        "set_f_zero set to 0",
+        "one or more input values out of range",
+        "INCAN no communication",
+        "Reading of INCAN parameters not complete",
+    ]
 
     def __init__(self):
-        self.ros_init()
+        rospy.init_node("ACF")
         self.get_params()
         self.connect()
-        self.authenticate()
+        assert self.authenticate()
+        self.ros_setup()
 
     def get_params(self):
-        local =rospy.get_param("~")
-        self.ip = local.get("ip", self.DEFAULT_IP)
-        self.port = local.get("port", self.DEFAULT_PORT)
-        self.authentication = local.get("authentication", self.DEFAULT_AUTHENTICATION)
-        self.id = local.get("id", self.DEFAULT_ID)
-        self.f_max = local.get("f_max", self.DEFAULT_F_MAX)
-        self.initial_force = local.get("initial_force", 0)
+        self.ip = rospy.get_param("~ip", self.DEFAULT_IP)
+        self.port = rospy.get_param("~port", self.DEFAULT_PORT)
+        self.authentication = rospy.get_param(
+            "~authentication", self.DEFAULT_AUTHENTICATION
+        )
+        self.id = rospy.get_param("~id", self.DEFAULT_ID)
+        self.f_max = rospy.get_param("~f_max", self.DEFAULT_F_MAX)
+        self.initial_force = rospy.get_param("~initial_force", 0)
         assert self.check_force(self.initial_force)
-        self.ramp_duration = local.get("ramp_duration", 0)
+        self.ramp_duration = rospy.get_param("~ramp_duration", 0)
         assert self.check_ramp_duration(self.ramp_duration)
-        self.payload = local.get("payload", 0)
+        self.payload = rospy.get_param("~payload", 0)
         assert self.check_payload(self.payload)
 
     def check_force(self, force):
@@ -65,7 +78,28 @@ class FerroboticsACF:
         return data == self.sock.recv(self.BUFSIZE)
 
     def send_command(self, force):
-        self.sock.send(bytes(self.DELIMINATOR.join((self.id, self.initial_force, self.ramp_duration, self.payload, 0)) + self.TERMINATOR))
+        try:
+            self.sock.send(
+                bytes(
+                    self.DELIMINATOR.join(
+                        str(field)
+                        for field in (
+                            self.id,
+                            force,
+                            self.initial_force,
+                            self.ramp_duration,
+                            self.payload,
+                            0,
+                        )
+                    )
+                    + self.TERMINATOR
+                )
+            )
+        except:
+            rospy.logwarn("Reconnecting...")
+            self.connect()
+            assert self.authenticate()
+            self.send_command(force)
 
     def disconnect(self):
         self.sock.send(self.DISCONNECT)
@@ -78,17 +112,23 @@ class FerroboticsACF:
     def handle_telem(self):
         data = self.recv_telem()
         telem = ACFTelem()
-        telem.id = data[0]
-        telem.force = data[1]
-        telem.position = data[2]
+        telem.id = int(data[0])
+        telem.force = float(data[1])
+        telem.position = float(data[2])
         telem.in_contact = bool(data[3])
-        telem.in_error = data[4] > 0
-        telem.errors = [bool(data[4] & (1<<i) for i in range(self.ERROR_CODE_BIN_LENGTH))]
-        telem.error_messages = [self.ERROR_MESSAGES[i] for i, error in enumerate(telem.errors) if error]
+        telem.in_error = int(data[4]) > 0
+        telem.errors = [
+            bool(int(data[4]) & (1 << i)) for i in range(self.ERROR_CODE_BIN_LENGTH)
+        ]
+        telem.error_messages = [
+            self.ERROR_MESSAGES[i] for i, error in enumerate(telem.errors) if error
+        ]
         self.telem_pub.publish(telem)
 
     def recv_telem(self):
-        return self.sock.recv(self.BUFSIZE).strip(self.TERMINATOR).split(self.DELIMINATOR)
+        return (
+            self.sock.recv(self.BUFSIZE).strip(self.TERMINATOR).split(self.DELIMINATOR)
+        )
 
     def set_payload(self, req):
         if not self.check_payload(req.value):
@@ -102,21 +142,22 @@ class FerroboticsACF:
         self.initial_force = req.value
         return SetFloatResponse(True, "")
 
-    def set_payload(self, req):
+    def set_t_ramp(self, req):
         duration = req.duration.to_secs()
         if not self.check_ramp_duration(duration):
             return SetDurationResponse(False, "Invalid duration.")
         self.ramp_duration = duration
         return SetDurationResponse(True, "")
 
-    def ros_init(self):
-        rospy.init_node("ACF")
+    def ros_setup(self):
         rospy.Subscriber("~/ACF/force", Float32, self.command_handler)
         self.telem_pub = rospy.Publisher("~/ACF/telem", ACFTelem, queue_size=5)
         rospy.Service("~/ACF/set_payload", SetFloat, self.set_payload)
         rospy.Service("~/ACF/set_f_zero", SetFloat, self.set_f_zero)
         rospy.Service("~/ACF/set_t_ramp", SetDuration, self.set_t_ramp)
 
+
 if __name__ == "__main__":
-    FerroboticsACF()
+    acf = FerroboticsACF()
     rospy.spin()
+    acf.disconnect()

@@ -102,7 +102,10 @@ class FerroboticsACF:
             self.send_command(force)
 
     def disconnect(self):
-        self.sock.send(self.DISCONNECT)
+        try:
+            self.sock.send(self.DISCONNECT)
+        except:
+            pass
 
     def command_handler(self, msg):
         self.send_command(msg.data)

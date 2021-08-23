@@ -10,6 +10,11 @@ from ferrobotics_acf.srv import (
 )
 from std_msgs.msg import Float32
 import socket
+import sys
+
+bytes_args = ()
+if sys.version_info.major >= 3:
+    bytes_args = ("ASCII",)
 
 
 class FerroboticsACF:
@@ -73,7 +78,7 @@ class FerroboticsACF:
         self.sock.connect((self.ip, self.port))
 
     def authenticate(self):
-        data = bytes(self.authentication + self.TERMINATOR)
+        data = bytes(self.authentication + self.TERMINATOR, *bytes_args)
         self.sock.send(data)
         return data == self.sock.recv(self.BUFSIZE)
 
@@ -92,7 +97,8 @@ class FerroboticsACF:
                             0,
                         )
                     )
-                    + self.TERMINATOR
+                    + self.TERMINATOR,
+                    *bytes_args
                 )
             )
         except:
@@ -127,7 +133,7 @@ class FerroboticsACF:
 
     def recv_telem(self):
         return (
-            self.sock.recv(self.BUFSIZE).strip(self.TERMINATOR).split(self.DELIMINATOR)
+            self.sock.recv(self.BUFSIZE).decode().strip(self.TERMINATOR).split(self.DELIMINATOR)
         )
 
     def set_payload(self, req):
